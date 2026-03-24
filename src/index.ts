@@ -1,4 +1,5 @@
 export { generateSpecs, openAPIRouteHandler } from "./handler.js";
+export { specsToMarkdown } from "./markdown.js";
 export {
   describeResponse,
   describeRoute,
