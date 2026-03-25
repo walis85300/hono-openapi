@@ -124,8 +124,8 @@ function renderTable(rows: Record<string, unknown>[]): string {
 
 	const lines: string[] = [];
 
-	// Header
-	lines.push(`| ${columns.join(" | ")} |`);
+	// Header — escape column names the same way we escape cell values
+	lines.push(`| ${columns.map((col) => escapeCell(col)).join(" | ")} |`);
 	lines.push(`| ${columns.map(() => "---").join(" | ")} |`);
 
 	// Rows
@@ -191,7 +191,7 @@ function formatCell(value: unknown): string {
 function formatValue(value: unknown): string {
 	if (value == null) return "-";
 	if (typeof value === "boolean") return value ? "Yes" : "No";
-	return String(value);
+	return String(value).replace(/\n/g, " ");
 }
 
 function formatHeading(key: string): string {

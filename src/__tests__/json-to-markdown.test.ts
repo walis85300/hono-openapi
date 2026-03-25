@@ -167,6 +167,251 @@ describe("jsonToMarkdown", () => {
 	});
 });
 
+describe("jsonToMarkdown edge cases", () => {
+	// --- Data shape edge cases ---
+
+	it("should handle array of empty objects", () => {
+		const md = jsonToMarkdown([{}, {}, {}]);
+		expect(md).toBe("*Empty table*");
+	});
+
+	it("should handle array of arrays (jagged 2D)", () => {
+		const data = [
+			[1, 2, 3],
+			[4, null, 6],
+			[7, 8],
+		];
+		const md = jsonToMarkdown(data);
+		// Not all objects, not all primitives → mixed numbered items
+		expect(md).toContain("**1.**");
+		expect(md).toContain("- 1\n- 2\n- 3");
+	});
+
+	it("should handle mixed-type array", () => {
+		const data = [1, "two", { key: "val" }, [3, 4], true];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("**1.**");
+		expect(md).toContain("**3.**");
+		expect(md).toContain("- **key:** val");
+	});
+
+	it("should handle single-item array with nested object", () => {
+		const data = [
+			{
+				id: "usr_01",
+				profile: { name: "Alice", bio: "Engineer" },
+				settings: { theme: "dark" },
+			},
+		];
+		const md = jsonToMarkdown(data);
+		// Single row table — still renders as table
+		expect(md).toContain("| id | profile | settings |");
+	});
+
+	it("should distinguish falsy values in table cells (null vs 0 vs false vs empty string)", () => {
+		const data = [
+			{ a: null, b: "", c: 0, d: false },
+			{ a: "real", b: "real", c: 1, d: true },
+		];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("| - |  | 0 | false |");
+		expect(md).toContain("| real | real | 1 | true |");
+	});
+
+	it("should handle object with only null value", () => {
+		expect(jsonToMarkdown({ status: null })).toBe("- **status:** -");
+	});
+
+	it("should handle array of nulls", () => {
+		const md = jsonToMarkdown([null, null, null]);
+		// All primitives → bullet list
+		expect(md).toContain("- null");
+	});
+
+	it("should handle numeric-string keys that look like array indices", () => {
+		const data = { "0": "zero", "1": "one", length: 3 };
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("- **0:** zero");
+		expect(md).toContain("- **1:** one");
+		expect(md).toContain("- **length:** 3");
+	});
+
+	it("should handle deeply nested single-key objects", () => {
+		const data = { a: { b: { c: { d: "deep" } } } };
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("## A");
+		expect(md).toContain("## B");
+		expect(md).toContain("deep");
+	});
+
+	it("should handle polymorphic array (different key sets per row)", () => {
+		const data = [
+			{ type: "PushEvent", payload: { size: 3 } },
+			{ type: "IssueEvent", payload: { action: "opened", number: 42 } },
+		];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("| type | payload |");
+		expect(md).toContain("PushEvent");
+		expect(md).toContain("IssueEvent");
+	});
+
+	// --- Markdown injection / special characters ---
+
+	it("should escape pipe characters in table header keys", () => {
+		const data = [{ "col|one": "val", normal: "ok" }];
+		const md = jsonToMarkdown(data);
+		// Header must escape pipes too
+		expect(md).not.toContain("| col|one |");
+		expect(md).toContain("col\\|one");
+	});
+
+	it("should escape newlines in table header keys", () => {
+		const data = [{ "line1\nline2": "val" }];
+		const md = jsonToMarkdown(data);
+		// Header row must not contain raw newline within the key
+		expect(md).toContain("| line1 line2 |");
+		expect(md.split("\n").length).toBe(3); // header, separator, data row
+	});
+
+	it("should handle values containing markdown heading syntax", () => {
+		const data = { title: "# OVERRIDE", note: "## Section" };
+		const md = jsonToMarkdown(data);
+		// Values should be inline, not render as actual headings
+		expect(md).toContain("- **title:** # OVERRIDE");
+	});
+
+	it("should handle values containing code fences", () => {
+		const data = { code: "```\nrm -rf /\n```" };
+		const md = jsonToMarkdown(data);
+		// Should not break key-value rendering
+		expect(md).toContain("- **code:**");
+	});
+
+	it("should escape newlines in key-value list values", () => {
+		const data = { description: "line one\nline two\nline three" };
+		const md = jsonToMarkdown(data);
+		// Newlines in values break the list item format
+		const lines = md.split("\n");
+		// Should be a single list item, not broken across lines
+		expect(lines[0]).toContain("- **description:**");
+		expect(lines[0]).toContain("line one");
+		expect(lines[0]).toContain("line two");
+	});
+
+	it("should handle HTML in values (passthrough, not execute)", () => {
+		const data = [{ name: "<script>alert(1)</script>" }];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("<script>alert(1)</script>");
+	});
+
+	it("should handle keys with markdown bold syntax", () => {
+		const data = { "**bold**": "value", normal: "ok" };
+		const md = jsonToMarkdown(data);
+		// Should still render, even if formatting looks weird
+		expect(md).toContain("**bold**");
+	});
+
+	it("should handle Unicode: RTL, zero-width, emoji sequences", () => {
+		const data = [
+			{
+				arabic: "مرحبا",
+				emoji: "👨‍👩‍👧‍👦",
+				combining: "e\u0301",
+				zeroWidth: "hel\u200Blo",
+			},
+		];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("| arabic | emoji | combining | zeroWidth |");
+		expect(md).toContain("مرحبا");
+		expect(md).toContain("👨‍👩‍👧‍👦");
+	});
+
+	it("should handle empty string key", () => {
+		const data = { "": "empty key", normal: "ok" };
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("- **:** empty key");
+	});
+
+	// --- Number edge cases ---
+
+	it("should handle number edge cases", () => {
+		const data = {
+			large: 9007199254740993,
+			tiny: 5e-324,
+			negative: -0,
+		};
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("- **large:**");
+		expect(md).toContain("- **tiny:**");
+	});
+
+	// --- Real API patterns ---
+
+	it("should handle GraphQL connection pattern (edges/node)", () => {
+		const data = {
+			data: {
+				users: {
+					edges: [
+						{ node: { id: 1, name: "Alice" } },
+						{ node: { id: 2, name: "Bob" } },
+					],
+					pageInfo: { hasNextPage: true, endCursor: "abc" },
+				},
+			},
+		};
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("## Data");
+		expect(md).toContain("node");
+	});
+
+	it("should handle Stripe-like paginated response", () => {
+		const data = {
+			object: "list",
+			has_more: true,
+			data: [
+				{ id: "ch_1", amount: 2000, currency: "usd" },
+				{ id: "ch_2", amount: 500, currency: "eur" },
+			],
+		};
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("- **object:** list");
+		expect(md).toContain("- **has_more:** Yes");
+		expect(md).toContain("## Data");
+		expect(md).toContain("| id | amount | currency |");
+	});
+
+	it("should handle RFC 7807 error response", () => {
+		const data = {
+			type: "https://example.com/errors/validation",
+			title: "Validation Failed",
+			status: 422,
+			errors: {
+				email: ["must be valid", "already taken"],
+				password: ["too short"],
+			},
+		};
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("- **status:** 422");
+		expect(md).toContain("## Errors");
+	});
+
+	it("should handle null-heavy sparse data", () => {
+		const data = [
+			{
+				id: "001",
+				name: "Acme",
+				phone: null,
+				fax: null,
+				website: null,
+				revenue: 5000000,
+				rating: null,
+			},
+		];
+		const md = jsonToMarkdown(data);
+		expect(md).toContain("| 001 | Acme | - | - | - | 5000000 | - |");
+	});
+});
+
 describe("markdownResponse middleware", () => {
 	it("should convert JSON to markdown when Accept: text/markdown", async () => {
 		const app = new Hono();
@@ -279,5 +524,83 @@ describe("markdownResponse middleware", () => {
 		expect(body).toContain("- **total:** 2");
 		expect(body).toContain("## Data");
 		expect(body).toContain("| id | name |");
+	});
+
+	it("should preserve CORS and custom headers when converting", async () => {
+		const app = new Hono();
+		app.use(markdownResponse());
+		app.get("/api", (c) => {
+			c.header("Access-Control-Allow-Origin", "*");
+			c.header("X-Request-Id", "req-123");
+			c.header("Cache-Control", "max-age=60");
+			return c.json({ status: "ok" });
+		});
+
+		const res = await app.request("/api", {
+			headers: { Accept: "text/markdown" },
+		});
+
+		expect(res.headers.get("Content-Type")).toBe(
+			"text/markdown; charset=utf-8",
+		);
+		expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+		expect(res.headers.get("X-Request-Id")).toBe("req-123");
+		expect(res.headers.get("Cache-Control")).toBe("max-age=60");
+	});
+
+	it("should handle 204 No Content with empty body", async () => {
+		const app = new Hono();
+		app.use(markdownResponse());
+		app.delete("/item", (c) => {
+			return c.body(null, 204);
+		});
+
+		const res = await app.request("/item", {
+			method: "DELETE",
+			headers: { Accept: "text/markdown" },
+		});
+
+		expect(res.status).toBe(204);
+	});
+
+	it("should NOT convert on Accept: */* (wildcard)", async () => {
+		const app = new Hono();
+		app.use(markdownResponse());
+		app.get("/data", (c) => c.json({ name: "test" }));
+
+		const res = await app.request("/data", {
+			headers: { Accept: "*/*" },
+		});
+
+		expect(res.headers.get("Content-Type")).toContain("application/json");
+	});
+
+	it("should NOT convert on Accept: text/*", async () => {
+		const app = new Hono();
+		app.use(markdownResponse());
+		app.get("/data", (c) => c.json({ name: "test" }));
+
+		const res = await app.request("/data", {
+			headers: { Accept: "text/*" },
+		});
+
+		expect(res.headers.get("Content-Type")).toContain("application/json");
+	});
+
+	it("should handle error responses (4xx/5xx) with JSON bodies", async () => {
+		const app = new Hono();
+		app.use(markdownResponse());
+		app.get("/fail", (c) =>
+			c.json({ error: "not found", code: 404 }, 404),
+		);
+
+		const res = await app.request("/fail", {
+			headers: { Accept: "text/markdown" },
+		});
+
+		expect(res.status).toBe(404);
+		const body = await res.text();
+		expect(body).toContain("- **error:** not found");
+		expect(body).toContain("- **code:** 404");
 	});
 });
