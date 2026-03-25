@@ -9,6 +9,7 @@ import type {
 } from "hono/types";
 import { findTargetHandler } from "hono/utils/handler";
 import type { OpenAPIV3_1 } from "openapi-types";
+import { specsToMarkdown } from "./markdown.js";
 import type {
   DescribeRouteOptions,
   GenerateSpecOptions,
@@ -49,11 +50,22 @@ export function openAPIRouteHandler<
   options?: Partial<GenerateSpecOptions>,
 ): MiddlewareHandler<E, P, I> {
   let specs: OpenAPIV3_1.Document;
+  let markdownCache: string | undefined;
 
   return async (c) => {
-    if (specs) return c.json(specs);
+    if (!specs) {
+      specs = await generateSpecs(hono, options, c);
+    }
 
-    specs = await generateSpecs(hono, options, c);
+    const accept = c.req.header("Accept") ?? "";
+    if (accept.includes("text/markdown")) {
+      if (!markdownCache) {
+        markdownCache = specsToMarkdown(specs);
+      }
+      return c.text(markdownCache, 200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+      });
+    }
 
     return c.json(specs);
   };
