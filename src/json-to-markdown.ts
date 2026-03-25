@@ -199,6 +199,7 @@ function formatHeading(key: string): string {
 	return key
 		.replace(/([a-z])([A-Z])/g, "$1 $2")
 		.replace(/[_-]+/g, " ")
+		.trim()
 		.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
