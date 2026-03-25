@@ -68,7 +68,6 @@ export function jsonToMarkdown(data: unknown): string {
 function renderArray(arr: unknown[]): string {
 	if (arr.length === 0) return "*Empty list*";
 
-	// Single pass to classify array contents
 	let allObjects = true;
 	let allPrimitives = true;
 	for (const item of arr) {
@@ -76,9 +75,7 @@ function renderArray(arr: unknown[]): string {
 			allPrimitives = false;
 		} else {
 			allObjects = false;
-			if (Array.isArray(item) || isPlainObject(item)) {
-				allPrimitives = false;
-			}
+			if (Array.isArray(item)) allPrimitives = false;
 		}
 		if (!allObjects && !allPrimitives) break;
 	}
@@ -149,21 +146,19 @@ function renderKeyValueList(obj: Record<string, unknown>): string {
 
 function renderSections(obj: Record<string, unknown>): string {
 	const sections: string[] = [];
-	const scalars: [string, unknown][] = [];
+	const scalarLines: string[] = [];
 	const complex: [string, unknown][] = [];
 
 	for (const [key, value] of Object.entries(obj)) {
 		if (isScalar(value)) {
-			scalars.push([key, value]);
+			scalarLines.push(formatKeyValue(key, value));
 		} else {
 			complex.push([key, value]);
 		}
 	}
 
-	if (scalars.length > 0) {
-		sections.push(
-			scalars.map(([key, value]) => formatKeyValue(key, value)).join("\n"),
-		);
+	if (scalarLines.length > 0) {
+		sections.push(scalarLines.join("\n"));
 	}
 
 	for (const [key, value] of complex) {
