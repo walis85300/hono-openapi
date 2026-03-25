@@ -65,27 +65,32 @@ export function jsonToMarkdown(data: unknown): string {
 	return renderObject(data as Record<string, unknown>);
 }
 
-// --- Renderers ---
-
 function renderArray(arr: unknown[]): string {
 	if (arr.length === 0) return "*Empty list*";
 
-	// Array of objects → table
-	if (arr.every((item) => isPlainObject(item))) {
-		return renderTable(arr as Record<string, unknown>[]);
+	// Single pass to classify array contents
+	let allObjects = true;
+	let allPrimitives = true;
+	for (const item of arr) {
+		if (isPlainObject(item)) {
+			allPrimitives = false;
+		} else {
+			allObjects = false;
+			if (Array.isArray(item) || isPlainObject(item)) {
+				allPrimitives = false;
+			}
+		}
+		if (!allObjects && !allPrimitives) break;
 	}
 
-	// Array of primitives → bullet list
-	if (arr.every((item) => !isPlainObject(item) && !Array.isArray(item))) {
+	if (allObjects) return renderTable(arr as Record<string, unknown>[]);
+
+	if (allPrimitives) {
 		return arr.map((item) => `- ${String(item)}`).join("\n");
 	}
 
-	// Mixed array → numbered items
 	return arr
-		.map((item, i) => {
-			const rendered = jsonToMarkdown(item);
-			return `**${i + 1}.**\n\n${rendered}`;
-		})
+		.map((item, i) => `**${i + 1}.**\n\n${jsonToMarkdown(item)}`)
 		.join("\n\n");
 }
 
@@ -104,11 +109,14 @@ function renderObject(obj: Record<string, unknown>): string {
 }
 
 function renderTable(rows: Record<string, unknown>[]): string {
-	// Collect all unique keys preserving order
+	const seen = new Set<string>();
 	const columns: string[] = [];
 	for (const row of rows) {
 		for (const key of Object.keys(row)) {
-			if (!columns.includes(key)) columns.push(key);
+			if (!seen.has(key)) {
+				seen.add(key);
+				columns.push(key);
+			}
 		}
 	}
 
@@ -129,16 +137,18 @@ function renderTable(rows: Record<string, unknown>[]): string {
 	return lines.join("\n");
 }
 
+function formatKeyValue(key: string, value: unknown): string {
+	return `- **${key}:** ${formatValue(value)}`;
+}
+
 function renderKeyValueList(obj: Record<string, unknown>): string {
 	return Object.entries(obj)
-		.map(([key, value]) => `- **${key}:** ${formatValue(value)}`)
+		.map(([key, value]) => formatKeyValue(key, value))
 		.join("\n");
 }
 
 function renderSections(obj: Record<string, unknown>): string {
 	const sections: string[] = [];
-
-	// Separate scalars from complex values
 	const scalars: [string, unknown][] = [];
 	const complex: [string, unknown][] = [];
 
@@ -150,30 +160,19 @@ function renderSections(obj: Record<string, unknown>): string {
 		}
 	}
 
-	// Render scalars as key-value list at the top
 	if (scalars.length > 0) {
 		sections.push(
-			scalars
-				.map(([key, value]) => `- **${key}:** ${formatValue(value)}`)
-				.join("\n"),
+			scalars.map(([key, value]) => formatKeyValue(key, value)).join("\n"),
 		);
 	}
 
-	// Render complex values as sections
 	for (const [key, value] of complex) {
 		const heading = `## ${formatHeading(key)}`;
 
 		if (Array.isArray(value)) {
-			if (value.length === 0) {
-				sections.push(`${heading}\n\n*Empty list*`);
-			} else if (value.every((item) => isPlainObject(item))) {
-				sections.push(`${heading}\n\n${renderTable(value as Record<string, unknown>[])}`);
-			} else {
-				sections.push(`${heading}\n\n${renderArray(value)}`);
-			}
+			sections.push(`${heading}\n\n${renderArray(value)}`);
 		} else if (isPlainObject(value)) {
-			const nested = renderObject(value as Record<string, unknown>);
-			sections.push(`${heading}\n\n${nested}`);
+			sections.push(`${heading}\n\n${renderObject(value as Record<string, unknown>)}`);
 		} else {
 			sections.push(`${heading}\n\n${jsonCodeBlock(value)}`);
 		}
@@ -181,8 +180,6 @@ function renderSections(obj: Record<string, unknown>): string {
 
 	return sections.join("\n\n");
 }
-
-// --- Formatters ---
 
 function formatCell(value: unknown): string {
 	if (value == null) return "-";
